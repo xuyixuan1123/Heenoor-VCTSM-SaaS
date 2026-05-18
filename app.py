@@ -1,7 +1,7 @@
 """
 VCTSM 爆款内容六维打分工具 — 双引擎版
 - 豆包: 火山引擎，每天 50 万 token 免费额度
-- 关键词: 规则匹配，完全免费（当前为希诺保温杯品类优化）
+- 关键词: 规则匹配，完全免费（支持上传自定义词库）
 - 单篇 + 批量 · Excel/CSV · 雷达图 + 优化建议
 """
 import sys, os, json, time, csv, io, re, math
@@ -30,7 +30,13 @@ DIM_TIPS = {"情绪密度":"在关键段落加入情感爆发点：愤怒质问�
 
 def keyword_score(text:str)->dict:
     if not isinstance(text,str) or not text.strip(): return {dim:2.5 for dim in DIMENSIONS}
-    return {dim:round(min(5.0,2.5+sum(1 for kw in SCORING_RUBRIC[dim].get("keywords",[]) if kw in text)*0.3),1) for dim in DIMENSIONS}
+    kw_source = st.session_state.get("custom_keywords") or SCORING_RUBRIC
+    result = {}
+    for dim in DIMENSIONS:
+        kws = kw_source.get(dim, {}).get("keywords", []) if isinstance(kw_source.get(dim), dict) else []
+        match_count = sum(1 for kw in kws if kw in text)
+        result[dim] = round(min(5.0, 2.5 + match_count * 0.3), 1)
+    return result
 
 def _read_secret_or_env(name:str):
     try:
@@ -139,6 +145,20 @@ with st.sidebar:
         st.session_state.raw_weights=dict(defaults)
         st.rerun()
     st.markdown("---")
+    st.markdown("**📝 品类关键词库**")
+    with st.expander("📤 上传自定义词库 (JSON)"):
+        st.caption("换品类只需替换词库，六维模型不变")
+        kw_file=st.file_uploader("上传 JSON 词库文件",type=["json"],key="kw_upload",help='格式: {"痛点强度":{"keywords":["词1","词2"]},...}')
+        if kw_file:
+            try:
+                custom_kw=json.loads(kw_file.read())
+                st.session_state.custom_keywords=custom_kw
+                st.success(f"✅ 已加载 {len(custom_kw)} 个维度的自定义词库")
+            except Exception as e: st.error(f"JSON 解析失败: {e}")
+        if st.button("🔄 恢复默认词库",use_container_width=True):
+            st.session_state.pop("custom_keywords",None)
+            st.rerun()
+        st.caption("当前：自定义词库" if st.session_state.get("custom_keywords") else "当前：希诺保温杯默认词库")
     mode=st.radio("📋 模式",["📝 单篇打分","📊 批量分析"],label_visibility="collapsed")
     st.markdown("---")
     st.caption("豆包 / 关键词 · 社交货币 · 情绪唤醒 · 使用与满足")
@@ -186,7 +206,7 @@ else:
             if c in df.columns: text_col=c; break
         if not text_col: st.error("未找到文本列！"); st.stop()
         if use_llm and (not DB_API_KEY or not DB_ENDPOINT):
-            st.error("豆包引擎未配置密钥，请在 Secrets 中设置 DOUBAO_API_KEY 和 DOUBAO_ENDPOINT_ID。")
+            st.error("豆包引擎未配置密钥。")
         else:
             delay=st.slider("调用间隔（秒）",0.0,5.0,0.0 if not use_llm else 1.0,0.5,disabled=not use_llm) if use_llm else 0
             if st.button("🚀 开始批量分析",type="primary",use_container_width=True):
